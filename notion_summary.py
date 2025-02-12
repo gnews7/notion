@@ -24,17 +24,16 @@ def get_notion_content():
 
     contents = []
     for item in data["results"]:
-        # 제목은 기존과 동일하게 "Aa Title" 속성 사용
-        title_key = "Aa Title"
-        # 이제 Abstract 대신 Transcript 컬럼의 데이터를 읽어옴
-        transcript_key = "Transcript"
+        # 제목은 "Title" 속성 사용
+        title_key = "Title"
+        transcript_key = "Transcript"  # Transcript 컬럼 사용
         url_key = "URL"
         tag_key = "Tag"
 
         title = item["properties"].get(title_key, {}).get("title", [{}])[0].get("text", {}).get("content", "제목 없음")
         url_value = item["properties"].get(url_key, {}).get("url", "URL 없음")
         
-        # Transcript 컬럼에서 데이터를 읽어옴 (rich_text 형식)
+        # Transcript 컬럼의 데이터를 읽어옴 (rich_text 형식)
         transcript_data = item["properties"].get(transcript_key, {}).get("rich_text", [])
         transcript_text = transcript_data[0]["text"]["content"] if transcript_data else "원문 없음"
         
@@ -44,49 +43,72 @@ def get_notion_content():
         contents.append({
             "title": title,
             "url": url_value,
-            "original_text": transcript_text,  # 여기서 transcript_text를 사용
+            "original_text": transcript_text,
             "tags": tags,
             "page_id": page_id
         })
 
     return contents
 
-# 본문의 언어를 감지하는 함수
+# 본문의 언어 감지 함수
 def detect_language(text):
     try:
-        lang = langdetect.detect(text)
-        return lang
-    except:
-        return "en"  # 기본값 영어
+        return langdetect.detect(text)
+    except Exception as e:
+        print("언어 감지 에러:", e)
+        return "en"
 
-# Google Gemini API를 사용한 언어 감지 기반 요약 함수
+# Google Gemini API를 사용한 요약 함수
 def summarize_content_gemini(title, original_text, url):
-    lang = detect_language(original_text)  # 원문의 언어 감지
-
-    # 원문이 비어있다면 기본 텍스트 설정
+    lang = detect_language(original_text)
+    # 만약 원문이 비어있다면 기본 문구 사용
     if not original_text or original_text == "원문 없음":
         original_text = "현재 원문이 제공되지 않았습니다. 제목과 관련된 내용을 요약합니다."
-
-    prompt = f"""
-아래 내용을 {'영어' if lang == 'en' else '한국어'}로 요약해줘.
-원문을 유지하면서 요약을 추가해야 해.
-핵심 개념, 주요 내용, 실전 적용 방법을 포함해서 정리해줘.
+    
+    # 한국어일 경우 번역하지 않고 그대로 한국어로 요약
+    if lang == "ko":
+        prompt = f"""
+아래 내용을 요약해줘.
+원문은 그대로 유지하고, 핵심 개념, 주요 내용, 실전 적용 방법을 포함해서 정리해줘.
 
 제목: {title}
 원문: {original_text}
 관련 링크: {url}
 
-요약 (Summary):
+[요약]
 핵심 개념:
-- (이 글에서 설명하는 가장 중요한 개념을 요약)
+- (이 글에서 설명하는 가장 중요한 개념)
 
 상세 설명:
 - (주요 내용을 7~8 문장으로 설명)
 
 실전 적용 방법:
-- (이 내용을 적용해서 어떤 결론이 나고 적용할 수 있는지 설명)
+- (이 내용을 활용해 어떤 결론을 도출할 수 있는지 설명)
 
 관련 링크:
+- {url}
+"""
+    else:
+        # 영어 등 다른 언어면 영어로 요약
+        prompt = f"""
+Summarize the following text.
+Keep the original text unchanged and include the key concepts, main points, and practical applications in your summary.
+
+Title: {title}
+Original text: {original_text}
+Related link: {url}
+
+[Summary]
+Key Concepts:
+- (Summarize the most important concepts of the text)
+
+Detailed Explanation:
+- (Explain the main points in 7-8 sentences)
+
+Practical Applications:
+- (Describe how the information can be applied)
+
+Related link:
 - {url}
 """
 
@@ -94,7 +116,7 @@ def summarize_content_gemini(title, original_text, url):
     response = model.generate_content(prompt)
     return response.text.strip()
 
-# Notion의 "Abstract" 컬럼에 원문 + 요약 저장 (요약 결과를 업데이트)
+# Notion의 "Abstract" 컬럼에 원문 + 요약 저장
 def update_notion_summary(page_id, original_text, summary):
     url = f"https://api.notion.com/v1/pages/{page_id}"
     headers = {
@@ -108,24 +130,26 @@ def update_notion_summary(page_id, original_text, summary):
 {original_text if original_text != '원문 없음' else '현재 원문이 제공되지 않았습니다.'}
 
 ---
-
 요약 (Summary):
 {summary}
 """
-
     data = {
         "properties": {
-            "Abstract": {"rich_text": [{"text": {"content": combined_text}}]}
+            "Abstract": {
+                "rich_text": [
+                    {"text": {"content": combined_text}}
+                ]
+            }
         }
     }
-
     response = requests.patch(url, headers=headers, data=json.dumps(data))
+    if response.status_code != 200:
+        print(f"Notion 업데이트 실패 (page_id: {page_id}):", response.text)
     return response.status_code
 
-# 실행: Notion 콘텐츠 가져오기 → Google Gemini로 요약 → Notion 업데이트
+# 실행: Notion 콘텐츠 가져오기 → Gemini API로 요약 → Notion 업데이트
 notion_contents = get_notion_content()
-
 for content in notion_contents:
     summary = summarize_content_gemini(content["title"], content["original_text"], content["url"])
-    update_notion_summary(content["page_id"], content["original_text"], summary)
-    print(f"'{content['title']}' 요약 완료 & Notion 업데이트!")
+    status = update_notion_summary(content["page_id"], content["original_text"], summary)
+    print(f"'{content['title']}' 요약 완료 & Notion 업데이트! (status: {status})")
