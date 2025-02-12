@@ -24,7 +24,6 @@ def get_notion_content():
 
     contents = []
     for item in data["results"]:
-        # 제목은 "Title" 속성 사용
         title_key = "Title"
         transcript_key = "Transcript"  # Transcript 컬럼 사용
         url_key = "URL"
@@ -33,7 +32,7 @@ def get_notion_content():
         title = item["properties"].get(title_key, {}).get("title", [{}])[0].get("text", {}).get("content", "제목 없음")
         url_value = item["properties"].get(url_key, {}).get("url", "URL 없음")
         
-        # Transcript 컬럼의 데이터를 읽어옴 (rich_text 형식)
+        # Transcript 컬럼에서 데이터를 읽어옴 (rich_text 형식)
         transcript_data = item["properties"].get(transcript_key, {}).get("rich_text", [])
         transcript_text = transcript_data[0]["text"]["content"] if transcript_data else "원문 없음"
         
@@ -61,11 +60,9 @@ def detect_language(text):
 # Google Gemini API를 사용한 요약 함수
 def summarize_content_gemini(title, original_text, url):
     lang = detect_language(original_text)
-    # 만약 원문이 비어있다면 기본 문구 사용
     if not original_text or original_text == "원문 없음":
         original_text = "현재 원문이 제공되지 않았습니다. 제목과 관련된 내용을 요약합니다."
     
-    # 한국어일 경우 번역하지 않고 그대로 한국어로 요약
     if lang == "ko":
         prompt = f"""
 아래 내용을 요약해줘.
@@ -89,7 +86,6 @@ def summarize_content_gemini(title, original_text, url):
 - {url}
 """
     else:
-        # 영어 등 다른 언어면 영어로 요약
         prompt = f"""
 Summarize the following text.
 Keep the original text unchanged and include the key concepts, main points, and practical applications in your summary.
@@ -111,12 +107,20 @@ Practical Applications:
 Related link:
 - {url}
 """
-
     model = genai.GenerativeModel("gemini-2.0-flash-lite-preview-02-05")
     response = model.generate_content(prompt)
     return response.text.strip()
 
-# Notion의 "Abstract" 컬럼에 원문 + 요약 저장
+# 헬퍼 함수: 텍스트를 최대 max_length 길이의 블록들로 분할
+def split_text_to_blocks(text, max_length=2000):
+    blocks = []
+    start = 0
+    while start < len(text):
+        blocks.append(text[start:start+max_length])
+        start += max_length
+    return blocks
+
+# Notion의 "Abstract" 컬럼에 원문 + 요약 저장 (여러 rich_text 블록으로 분할)
 def update_notion_summary(page_id, original_text, summary):
     url = f"https://api.notion.com/v1/pages/{page_id}"
     headers = {
@@ -133,18 +137,20 @@ def update_notion_summary(page_id, original_text, summary):
 요약 (Summary):
 {summary}
 """
+    # 분할된 텍스트 블록 리스트 생성
+    blocks = split_text_to_blocks(combined_text, max_length=2000)
+    rich_text_blocks = [{"text": {"content": block}} for block in blocks]
+
     data = {
         "properties": {
             "Abstract": {
-                "rich_text": [
-                    {"text": {"content": combined_text}}
-                ]
+                "rich_text": rich_text_blocks
             }
         }
     }
     response = requests.patch(url, headers=headers, data=json.dumps(data))
     if response.status_code != 200:
-        print(f"Notion 업데이트 실패 (page_id: {page_id}):", response.text)
+        print(f"❌ Notion 업데이트 실패 (page_id: {page_id}):", response.text)
     return response.status_code
 
 # 실행: Notion 콘텐츠 가져오기 → Gemini API로 요약 → Notion 업데이트
@@ -152,4 +158,4 @@ notion_contents = get_notion_content()
 for content in notion_contents:
     summary = summarize_content_gemini(content["title"], content["original_text"], content["url"])
     status = update_notion_summary(content["page_id"], content["original_text"], summary)
-    print(f"'{content['title']}' 요약 완료 & Notion 업데이트! (status: {status})")
+    print(f"✅ '{content['title']}' 요약 완료 & Notion 업데이트! (status: {status})")
