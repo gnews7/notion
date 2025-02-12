@@ -1,9 +1,9 @@
 import requests
 import json
 import google.generativeai as genai
-import langdetect  # 언어 감지 패키지 (설치: pip install langdetect)
+import langdetect  # 설치: pip install langdetect
 
-# Notion & Google Gemini API 키 설정
+# Notion & Google Gemini API 키 설정 (실제 키로 대체)
 NOTION_API_KEY = "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"
 DATABASE_ID = "198e844c672180afa2fce14539f4760c"
 GEMINI_API_KEY = "AIzaSyCt_u7EiEPqhkb1ByL7uIMgRV7WXQaoQFQ"
@@ -11,7 +11,7 @@ GEMINI_API_KEY = "AIzaSyCt_u7EiEPqhkb1ByL7uIMgRV7WXQaoQFQ"
 # Google Gemini API 키 설정
 genai.configure(api_key=GEMINI_API_KEY)
 
-# Notion API에서 데이터 가져오기 (Abstract 컬럼 포함)
+# Notion API에서 데이터 가져오기 (Transcript 컬럼 사용)
 def get_notion_content():
     url = f"https://api.notion.com/v1/databases/{DATABASE_ID}/query"
     headers = {
@@ -24,32 +24,34 @@ def get_notion_content():
 
     contents = []
     for item in data["results"]:
+        # 제목은 기존과 동일하게 "Aa Title" 속성 사용
         title_key = "Aa Title"
+        # 이제 Abstract 대신 Transcript 컬럼의 데이터를 읽어옴
+        transcript_key = "Transcript"
         url_key = "URL"
-        abstract_key = "Abstract"
         tag_key = "Tag"
 
         title = item["properties"].get(title_key, {}).get("title", [{}])[0].get("text", {}).get("content", "제목 없음")
-        url = item["properties"].get(url_key, {}).get("url", "URL 없음")
-
-        # Abstract 컬럼에서 데이터 가져오기
-        abstract_data = item["properties"].get(abstract_key, {}).get("rich_text", [])
-        original_text = abstract_data[0]["text"]["content"] if abstract_data else "원문 없음"
-
+        url_value = item["properties"].get(url_key, {}).get("url", "URL 없음")
+        
+        # Transcript 컬럼에서 데이터를 읽어옴 (rich_text 형식)
+        transcript_data = item["properties"].get(transcript_key, {}).get("rich_text", [])
+        transcript_text = transcript_data[0]["text"]["content"] if transcript_data else "원문 없음"
+        
         tags = [tag["name"] for tag in item["properties"].get(tag_key, {}).get("multi_select", [])]
         page_id = item["id"]
 
         contents.append({
             "title": title,
-            "url": url,
-            "original_text": original_text,
+            "url": url_value,
+            "original_text": transcript_text,  # 여기서 transcript_text를 사용
             "tags": tags,
             "page_id": page_id
         })
 
     return contents
 
-# 본문의 언어를 감지하고 해당 언어로 요약하는 함수
+# 본문의 언어를 감지하는 함수
 def detect_language(text):
     try:
         lang = langdetect.detect(text)
@@ -90,10 +92,9 @@ def summarize_content_gemini(title, original_text, url):
 
     model = genai.GenerativeModel("gemini-2.0-flash-lite-preview-02-05")
     response = model.generate_content(prompt)
-
     return response.text.strip()
 
-# Notion의 "Abstract" 컬럼에 원문 + 요약 저장
+# Notion의 "Abstract" 컬럼에 원문 + 요약 저장 (요약 결과를 업데이트)
 def update_notion_summary(page_id, original_text, summary):
     url = f"https://api.notion.com/v1/pages/{page_id}"
     headers = {
