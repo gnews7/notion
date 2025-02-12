@@ -66,7 +66,7 @@ def summarize_content_gemini(title, original_text, url):
     if lang == "ko":
         prompt = f"""
 아래 내용을 요약해줘.
-원문은 그대로 유지하고, 핵심 개념, 주요 내용, 실전 적용 방법을 포함해서 정리해줘.
+핵심 개념, 주요 내용, 실전 적용 방법을 포함해서 정리해줘.
 
 제목: {title}
 원문: {original_text}
@@ -88,7 +88,7 @@ def summarize_content_gemini(title, original_text, url):
     else:
         prompt = f"""
 Summarize the following text.
-Keep the original text unchanged and include the key concepts, main points, and practical applications in your summary.
+Include the key concepts, main points, and practical applications in your summary.
 
 Title: {title}
 Original text: {original_text}
